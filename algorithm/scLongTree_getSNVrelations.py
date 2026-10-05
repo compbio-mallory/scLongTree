@@ -119,7 +119,7 @@ def findSNVpairs_OnSameBranches(node_mut):
 def findSNVpairs_OnAncestralBranches(pID_cID,node_mut,sameSNVs):
     SNV_pairs = []
     for pid,cid in pID_cID.items():
-        if '0' in pid:
+        if pid == '0':
             continue
         parent_nodeId = pid
         if ',' in parent_nodeId:

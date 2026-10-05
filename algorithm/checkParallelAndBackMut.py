@@ -259,50 +259,80 @@ def finalBackMutEdges(Tree, backMut_edges, D_matrix, tp_alpha, tp_beta, k):
 # Input is Tree, parallel edges for each mutation, selected parallel edges, back mutation edges, allowed back mutation edges
 def correctParallelMut(Tree, parallel_edges, mut_edges):
     """
-    parallel_edges: dict {mut -> [all candidate edges discovered]}
-    mut_edges: dict {mut -> [selected edges to keep]}
+    Correct only mutations that were actually identified as parallel.
+
+    parallel_edges:
+        dict {mut -> [candidate occurrence edges]}
+        This dictionary may contain ordinary single-occurrence mutations too.
+
+    mut_edges:
+        dict {parallel_mut -> [selected occurrence edges to keep]}
+        Only mutations present in this dictionary should be corrected.
     """
+
     def find_all_occurrence_edges(mut):
         out = []
+
         for j in range(1, len(Tree)):
             p = Tree[j].pID
+
             if p == -2:
                 continue
+
             parent_muts = set(Tree[p].mutations)
-            child_muts  = set(Tree[j].mutations)
+            child_muts = set(Tree[j].mutations)
+
+            # Mutation is acquired on p -> j
             if (mut in child_muts) and (mut not in parent_muts):
                 out.append(f"{p}_{j}")
+
         return out
 
-    for mut in list(parallel_edges.keys()):
-        full = set(find_all_occurrence_edges(mut))
-        given = set(parallel_edges.get(mut, []))
-        parallel_edges[mut] = list(full | given)
+    # IMPORTANT:
+    # Iterate only over mutations that were actually selected/identified
+    # as parallel mutations.  parallel_edges can contain ordinary
+    # single-occurrence mutations and those must not be removed.
+    for mut, selected in mut_edges.items():
 
-    for mut, edges in parallel_edges.items():
-        if mut not in mut_edges:
-            # by default, remove all occurrences if none selected (shouldn't happen)
-            keep_edges = []
-        else:
-            keep_edges = set(mut_edges[mut])
+        full_edges = set(find_all_occurrence_edges(mut))
+        candidate_edges = set(parallel_edges.get(mut, []))
 
-        for e in edges:
+        # Include all observed occurrence edges for safety.
+        all_edges = full_edges | candidate_edges
+
+        keep_edges = set(selected)
+
+        for e in all_edges:
+
             if e in keep_edges:
-                continue  # keep this occurrence
+                continue
+
             child_node = int(e.split('_')[1])
+
+            # Remove the unwanted parallel occurrence from this child.
             if mut in Tree[child_node].mutations:
                 Tree[child_node].mutations.remove(mut)
 
-            pNode = int(list(keep_edges)[0].split('_')[0]) if keep_edges else None
-            if pNode is not None and Tree[pNode].pID == child_node:
-                # Don't remove parent node's descendants
+            # Preserve the existing special-case behavior.
+            pNode = (
+                int(list(keep_edges)[0].split('_')[0])
+                if keep_edges
+                else None
+            )
+
+            if (
+                pNode is not None
+                and Tree[pNode].pID == child_node
+            ):
                 continue
 
-            # remove the parallel mutation from its subtree under this child edge
+            # Remove the unwanted occurrence throughout its subtree.
             subtree_nodes = nodeChildren(Tree, child_node, [])
+
             for n in subtree_nodes:
                 if mut in Tree[n].mutations:
                     Tree[n].mutations.remove(mut)
+
     return Tree
 
 

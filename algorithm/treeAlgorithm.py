@@ -183,12 +183,14 @@ maximum overlap with the unobserved node.'''
 To connect with the parent we choose the node in time t that has largest intersection of mutations. '''
 # Input is the Tree, nodes in previous timepoint, hash_table, timepoint for unobserved subclone, iter No.
 def select_unobservedSubclones(Tree, nodes, sorted_hash_table, usc_timepoint, iterNo):
-    noOfIntersections = 0
-    parentNode = {} # used to save the parentNode. There can be only one parent.
     nodes_added = []
     unobserved_subclones = []
 
     for mut, nodeList in sorted_hash_table.items(): # sorted hash table is a tuple here
+        # Parent selection must be recomputed independently for each
+        # candidate unobserved subclone.
+        noOfIntersections = 0
+        parentNode = {} # used to save the parentNode. There can be only one parent.
         # re-check if this unobserved subclone should be eliminated before proceeding.
         print("Nodes added ",nodes_added," nodes list ",nodeList," unobserved_subclones ",unobserved_subclones," mut ",mut)
         if nodes_added != []:
@@ -212,15 +214,42 @@ def select_unobservedSubclones(Tree, nodes, sorted_hash_table, usc_timepoint, it
                 continue
             mutSubset = set(Tree[n].mutations) & set(mut_list)
             #print(" Mutation subset ",mutSubset," ",Tree[n].mutations," ",mut_list)
-            if len(mutSubset) > noOfIntersections:
-                noOfIntersections = len(mutSubset)
-                print("Could have selected parent ",n," overlapped mutations ",noOfIntersections)
-                if iterNo > 1: # If unobserved subclone from other iterations have less mutations than existing one then don't enroll them
-                    if len(mut_list) != len(Tree[n].mutations) and set(mut_list).issuperset(set(Tree[n].mutations)): # new unobserved subclone should also be a proper superset of its parent
-                        print("Selected parent ",n)
-                        parentNode[0] = n # Update the node with maximum no. of intersections
-                else:
-                    parentNode[0] = n # Update the node with maximum no. of intersections
+
+            # For later iterations, only valid ancestral subsets can be
+            # considered as parents.
+            if iterNo > 1:
+                valid_parent = (
+                    len(mut_list) != len(Tree[n].mutations)
+                    and set(mut_list).issuperset(set(Tree[n].mutations))
+                )
+                if not valid_parent:
+                    continue
+
+            overlap = len(mutSubset)
+            back_mut_count = len(set(Tree[n].mutations) - set(mut_list))
+
+            if overlap > noOfIntersections:
+                noOfIntersections = overlap
+                print("Could have selected parent ",n,
+                      " overlapped mutations ",noOfIntersections,
+                      " implied back mutations ",back_mut_count)
+                parentNode[0] = n
+
+            elif overlap == noOfIntersections and overlap > 0 and parentNode != {}:
+                current_parent = parentNode[0]
+                current_back_mut_count = len(
+                    set(Tree[current_parent].mutations) - set(mut_list)
+                )
+
+                # Tie breaker: among parents with the same maximum
+                # mutation overlap, choose the one implying fewer
+                # back mutations.
+                if back_mut_count < current_back_mut_count:
+                    print("Tie on overlap; replacing parent ",
+                          current_parent," with ",n,
+                          " because implied back mutations ",
+                          current_back_mut_count," -> ",back_mut_count)
+                    parentNode[0] = n
         
         if parentNode == {}:
             continue
@@ -472,6 +501,12 @@ def connect_remainingNodes(Tree, tp_nodes, tp_usc_nodes):
             print(" List of prev_tp_nodes ",prev_tp_nodes)
             # First check for subset of mutations
             parentNode = selectNode_maxCommonMutation(Tree, prev_tp_nodes, Tree[i].mutations)
+            # If the root is the only subset parent, treat it as no subset parent and apply the existing least-back-mutation rule to the unobserved nodes at this timepoint that share at least one mutation with this node.
+            
+            if parentNode == 0 and Tree[i].timepoint in tp_usc_nodes:
+                usc_candidates = [u for u in tp_usc_nodes[Tree[i].timepoint] if Tree[u].pID != -2 and set(Tree[u].mutations) & set(Tree[i].mutations)]
+                if usc_candidates != []:
+                    parentNode = select_nodeV_withLeastMutationLoss(Tree, usc_candidates, Tree[i].mutations)
             if parentNode != -1:
                 Tree[i].pID = parentNode
                 Tree[Tree[i].pID].children.append(i)

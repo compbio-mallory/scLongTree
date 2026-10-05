@@ -489,33 +489,127 @@ def clusteringResults(D_matrix, tp, tp_cluster_cells, tp_cluster_genotype, tp_al
     return tp_cluster_genotype, tp_cluster_cells
 
 ''' Correct the parallel and back mutations and return new Tree and corrected cluster genotype. '''
-def correctParallelAndBackMut(D_matrix, tp_cluster_cells, tp_cluster_genotype, tp_alpha, tp_beta,
-                              Tree, clone_node, k, plotOp, noOfiter, sample, max_parallel_extra):
-    # Detect candidates
-    parallel_mut, parallelMut_edges = getParallelMut(Tree)
+def correctParallelAndBackMut(D_matrix, tp_cluster_cells, tp_cluster_genotype,
+                              tp_alpha, tp_beta, Tree, clone_node, k,
+                              plotOp, noOfiter, sample, max_parallel_extra):
+
+    # ============================================================
+    # 1. BACK MUTATIONS FIRST
+    # ============================================================
+    #
+    # A mutation classified as a back mutation gets precedence.
+    # After it has been classified as back-mutated, it must not
+    # subsequently be treated as a parallel mutation.
+    #
     backMut_edges = getBackMutCount(Tree)
-    print(" Parallel edges ", parallelMut_edges)
 
-    # Select edges to keep
-    parallelEdges = finalParallelMutEdges(Tree, parallel_mut, parallelMut_edges, D_matrix, tp_alpha, tp_beta, max_parallel_extra)
-    backEdges = finalBackMutEdges(Tree, backMut_edges, D_matrix, tp_alpha, tp_beta, k)
+    backEdges = finalBackMutEdges(
+        Tree,
+        backMut_edges,
+        D_matrix,
+        tp_alpha,
+        tp_beta,
+        k
+    )
 
-    print("Selected parallel edges ", parallelEdges)
     print("Selected back edges ", backEdges)
 
-    # Apply corrections
-    Tree = correctParallelMut(Tree, parallelMut_edges, parallelEdges)
+    # Keep selected loss edges and repair only unselected losses.
+    Tree = correctBackMut(
+        Tree,
+        backMut_edges,
+        backEdges
+    )
+
+    print("Tree after correcting back mutations ")
+    printTree(Tree)
+
+    # Only mutations with an actually retained/allowed back-mutation
+    # edge get precedence over parallel-mutation correction.
+    # Mutations whose losses were repaired (e.g. when k=0) must remain
+    # eligible for parallel correction.
+    back_mut_set = {
+        mut
+        for mut, edges in backEdges.items()
+        if len(edges) > 0
+    }
+
+    # ============================================================
+    # 2. PARALLEL MUTATIONS SECOND
+    # ============================================================
+    #
+    # Detect parallel mutations only after back-mutation correction.
+    #
+    parallel_mut, parallelMut_edges = getParallelMut(Tree)
+
+    # Do not allow a mutation already classified as a back mutation
+    # to be treated as parallel.
+    parallel_mut = [
+        mut
+        for mut in parallel_mut
+        if mut not in back_mut_set
+    ]
+
+    parallelMut_edges = {
+        mut: edges
+        for mut, edges in parallelMut_edges.items()
+        if mut not in back_mut_set
+    }
+
+    print("Parallel mutations after excluding back mutations ",
+          parallel_mut)
+
+    print("Parallel edges after excluding back mutations ",
+          parallelMut_edges)
+
+    parallelEdges = finalParallelMutEdges(
+        Tree,
+        parallel_mut,
+        parallelMut_edges,
+        D_matrix,
+        tp_alpha,
+        tp_beta,
+        max_parallel_extra
+    )
+
+    print("Selected parallel edges ", parallelEdges)
+
+    Tree = correctParallelMut(
+        Tree,
+        parallelMut_edges,
+        parallelEdges
+    )
+
     print("Tree after correcting parallel mutations ")
     printTree(Tree)
-    Tree = correctBackMut(Tree, backMut_edges, backEdges)
+
+    # ============================================================
+    # 3. FINAL TREE CLEANUP
+    # ============================================================
+
     Tree = recheckTree(Tree)
-    print("========== TREE after correcting PARALLEL and BACK MUTATIONS =========== ")
+
+    print(
+        "========== TREE after correcting BACK and "
+        "PARALLEL MUTATIONS =========== "
+    )
     printTree(Tree)
 
-    # Update genotypes from corrected tree
-    new_tp_cluster_genotype = genotypeFromTree(Tree, tp_cluster_genotype, clone_node, len(D_matrix[0]))
+    # Update clone genotypes using the final corrected tree.
+    new_tp_cluster_genotype = genotypeFromTree(
+        Tree,
+        tp_cluster_genotype,
+        clone_node,
+        len(D_matrix[0])
+    )
 
-    return Tree, new_tp_cluster_genotype, parallelEdges, backEdges
+    return (
+        Tree,
+        new_tp_cluster_genotype,
+        parallelEdges,
+        backEdges
+    )
+
 
 
 ''' Map the cluster no. to nodes to get their probability. '''
@@ -535,14 +629,65 @@ def getInitialTree(D_matrix, tp_cluster_prob, tp_cluster_cells, tp_cluster_genot
     initial_tp_FP, initial_tp_FN = timepointFPFN(D_matrix, tp_cluster_cells, tp_cluster_genotype)
     return Tree, clone_node, tree_prob, initial_tp_FP, initial_tp_FN
 
+
+# Return all mutations currently represented by at least one clone.
+def getPresentMutations(tp_cluster_genotype):
+    present = set()
+
+    for tp, clusters in tp_cluster_genotype.items():
+        for cluster, genotype in clusters.items():
+            for mut, value in enumerate(genotype):
+                if value == 1:
+                    present.add(mut)
+
+    return present
+
+
+# Protect clusters that are the sole remaining carrier of a mutation.
+def getMutationPreservingClusters(tp_cluster_genotype):
+    mutation_holders = {}
+
+    for tp, clusters in tp_cluster_genotype.items():
+        for cluster, genotype in clusters.items():
+            for mut, value in enumerate(genotype):
+                if value == 1:
+                    mutation_holders.setdefault(mut, []).append((tp, cluster))
+
+    protected = {}
+
+    for mut, holders in mutation_holders.items():
+        if len(holders) == 1:
+            holder = holders[0]
+            protected.setdefault(holder, []).append(mut)
+
+    return protected
+
 ''' All the steps done for each cluster to decide if it should be part of the Tree. '''
-def iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold):
+def iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold, preserve_mutations=False):
     tp = int(tp_cluster.split('_')[0])
     cluster = int(tp_cluster.split('_')[1])
     print(" Timepoint ",tp," checking if we can ignore cluster ",cluster)
     print(" Cluster genotype before merging ")
     if cluster not in tp_cluster_cells[tp]:
         return None, tp_cluster_genotype, tp_cluster_cells, None, None
+
+    # Optional mutation-preserving mode:
+    # skip this pruning attempt if this cluster is currently
+    # the sole remaining carrier of one or more mutations.
+    if preserve_mutations:
+        protected_clusters = getMutationPreservingClusters(tp_cluster_genotype)
+        key = (tp, cluster)
+
+        if key in protected_clusters:
+            print(
+                "MUTATION-PRESERVING MODE: cluster",
+                cluster,
+                "in timepoint",
+                tp,
+                "will not be pruned; sole carrier of mutations",
+                protected_clusters[key]
+            )
+            return None, tp_cluster_genotype, tp_cluster_cells, None, None
 
     printMutFromGenotype(tp_cluster_genotype[tp])
     cells = tp_cluster_cells[tp][cluster]
@@ -565,6 +710,30 @@ def iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, 
         tp_cluster_cells = prev_tp_cluster_cells
         return None, tp_cluster_genotype, tp_cluster_cells, old_tp_FP, old_tp_FN
 
+    # Definitive mutation-preservation check.
+    # Even if this cluster was not the sole carrier before pruning,
+    # merging/reassignment must not cause any currently represented
+    # mutation to disappear completely.
+    if preserve_mutations:
+        before_mutations = getPresentMutations(prev_tp_cluster_genotype)
+        after_mutations = getPresentMutations(tp_cluster_genotype)
+        lost_mutations = sorted(before_mutations - after_mutations)
+
+        if lost_mutations:
+            print(
+                "MUTATION-PRESERVING MODE: pruning cluster",
+                cluster,
+                "in timepoint",
+                tp,
+                "rejected; would completely remove mutations",
+                lost_mutations
+            )
+
+            tp_cluster_genotype = prev_tp_cluster_genotype
+            tp_cluster_cells = prev_tp_cluster_cells
+
+            return None, tp_cluster_genotype, tp_cluster_cells, old_tp_FP, old_tp_FN
+
     print(" Cluster genotype after merging ")
     printMutFromGenotype(tp_cluster_genotype[tp])
 
@@ -582,7 +751,7 @@ def iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, 
 
 ''' Select the tree with the highest probability. '''
 # Input is D_matrix, alpha and beta in each timepoint, cluster probabilities in each timepoint, cells in each cluster, cluster genotypes
-def selectOptimalTree(D_matrix, bnpc_cells_genotype, tp_alpha, tp_beta, tp_MR, tp_cluster_prob, tp_cluster_cells, tp_cluster_genotype, tpCells, k, tp_FPrate_threshold, tp_FNrate_threshold, max_parallel_extra,plotOp, bnpcRun, sample):
+def selectOptimalTree(D_matrix, bnpc_cells_genotype, tp_alpha, tp_beta, tp_MR, tp_cluster_prob, tp_cluster_cells, tp_cluster_genotype, tpCells, k, tp_FPrate_threshold, tp_FNrate_threshold, max_parallel_extra,plotOp, bnpcRun, sample, preserve_mutations=False):
     # Get the initial Tree from the clustering results
     initialTree, initialCloneNode, tree_prob, initial_tp_FP, initial_tp_FN = getInitialTree(D_matrix, tp_cluster_prob, tp_cluster_cells, tp_cluster_genotype)
 
@@ -628,7 +797,7 @@ def selectOptimalTree(D_matrix, bnpc_cells_genotype, tp_alpha, tp_beta, tp_MR, t
                 #print("Timepoint cluster cells ",tp_cluster_cells)
                 
                 # Check for each cluster if it should be part of the Tree.
-                cluster, tp_cluster_genotype, tp_cluster_cells, new_tp_FP, new_tp_FN = iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold)
+                cluster, tp_cluster_genotype, tp_cluster_cells, new_tp_FP, new_tp_FN = iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold, preserve_mutations)
                 if cluster == None:
                     continue
 
@@ -673,7 +842,7 @@ def selectOptimalTree(D_matrix, bnpc_cells_genotype, tp_alpha, tp_beta, tp_MR, t
             print("Tp_cluster_prob ",tp_cluster_prob)
 
             # Check for each cluster if it should be part of the Tree.
-            cluster, tp_cluster_genotype, tp_cluster_cells, new_tp_FP, new_tp_FN = iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold)
+            cluster, tp_cluster_genotype, tp_cluster_cells, new_tp_FP, new_tp_FN = iterationSteps(D_matrix, tp_cluster, tp_cluster_genotype, tp_cluster_cells, tp_MR, noOfiter, tp_alpha, tp_beta, tp_FPrate_threshold, tp_FNrate_threshold, preserve_mutations)
             if cluster == None:
                 continue
             

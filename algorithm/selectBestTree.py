@@ -121,7 +121,7 @@ def selectBnpCBestRun(bnpc_runs, bnpc_prob):
 
 ''' Return the Tree with the highest prob from all the BnpC runs. '''
 # Input: m = no. of Bnpc runs, t = no. of timepoints, cLoc = clustering results location
-def getTreeWithHighestProb(m, t, cLoc, tp_MR, tpCells, D_matrix, k, tp_fp, tp_fn, plotOp, sample, max_parallel_extra):
+def getTreeWithHighestProb(m, t, cLoc, tp_MR, tpCells, D_matrix, k, tp_fp, tp_fn, plotOp, sample, max_parallel_extra, preserve_mutations=False):
     Tree_prob = {} # Save the trees for each BnpC run
     Tree_backMut = {} # Save back mutations for each BnpC run
     Tree_beforeCorrection = {} # Save the Trees for each run before parallel and back mutation corrections
@@ -163,7 +163,8 @@ def getTreeWithHighestProb(m, t, cLoc, tp_MR, tpCells, D_matrix, k, tp_fp, tp_fn
                     sorted_cluster_prob, tp_reassignedCells, tp_updatedCG, tpCells,
                     k, tp_fp, tp_fn,
                     int(max_parallel_extra),
-                    plotOp, str(i), sample
+                    plotOp, str(i), sample,
+                    preserve_mutations
                 )
 
         bnpc_FP[i] = tp_alpha
@@ -215,6 +216,11 @@ parser.add_argument("-k", "--k", help="No. of losses allowed")
 parser.add_argument("-op", "--op", help="Path to save the resulting Tree.")
 parser.add_argument("-sample", "--sample", help="Sample name to plot the graphs.", default="default")
 parser.add_argument("-p", "--parallel", help="Max extra parallel mutations per locus (P). Total allowed occurrences = 1 + P.", default=0)
+parser.add_argument(
+    "--preserve-mutations",
+    action="store_true",
+    help="Do not prune a clone if pruning it would completely remove one or more mutations from the current clone genotypes."
+)
 
 args = parser.parse_args()
 
@@ -234,4 +240,5 @@ tp_FP, tp_FN = getFPFN_threshold(int(args.m), args.t, args.loc)
 #    os.makedirs("plots/"+args.op) # Make the dir to save the plots
 
 getTreeWithHighestProb(int(args.m), args.t, args.loc, tp_MR, tpCells, D_matrix,
-                       int(args.k), tp_FP, tp_FN, args.op, args.sample, int(args.parallel))
+                       int(args.k), tp_FP, tp_FN, args.op, args.sample, int(args.parallel),
+                       args.preserve_mutations)

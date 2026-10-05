@@ -1,4 +1,15 @@
-sclt_job.slurm
-sclt_runner.sh
-setup_and_submit.sh/
-logs/
+__pycache__/
+*.py[cod]
+*.swp
+*.swo
+.DS_Store
+
+# User-generated scLongTree output
+TreeCSVs/
+plots/
+output/
+
+# Temporary/runtime files
+*.log
+*.out
+*.err
