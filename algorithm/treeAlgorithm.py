@@ -459,9 +459,14 @@ def select_nodeV_withLeastMutationLoss(Tree, t1_nodes, mut):
         #diff_mut = set(mut) - set(Tree[n].mutations)
         v_mut_diff[n] = len(diff_mut)
 
-    # Select the node with minimum back mutations
+    ## Select the node with minimum back mutations
+    #print("Dict to select node v ",v_mut_diff)
+    #nodeV = min(v_mut_diff,key=v_mut_diff.get)
+
+    # Mallory fixed thsi bug that applies the same rule (most shared; ties => least back mutations) to the leftover nodes that are not connected to any unobserved nodes yet. 10/05/2026
+    # Select the node sharing the most mutations; ties -> fewest back mutations
     print("Dict to select node v ",v_mut_diff)
-    nodeV = min(v_mut_diff,key=v_mut_diff.get)
+    nodeV = max(v_mut_diff, key=lambda n: (len(set(Tree[n].mutations) & set(mut)), -v_mut_diff[n]))
     print("Selected node v ",nodeV)
     return nodeV
 
