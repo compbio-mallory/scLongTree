@@ -22,9 +22,8 @@ scLongTree/
 ```
 
 ## Simulator
-
-Simulation utilities are maintained separately on the
-[`simulator` branch](https://github.com/compbio-mallory/scLongTree/tree/simulator/simulation).
+Simulation utilities used to generate synthetic datasets are available on the
+[`simulator` branch](https://github.com/compbio-mallory/scLongTree/tree/simulator).
 
 
 ## Requirements
