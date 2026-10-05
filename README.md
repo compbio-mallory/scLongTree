@@ -21,6 +21,12 @@ scLongTree/
 └── README.md
 ```
 
+## Simulator
+
+Simulation utilities are maintained separately on the
+[`simulator` branch](https://github.com/compbio-mallory/scLongTree/tree/simulator/simulation).
+
+
 ## Requirements
 
 scLongTree requires Python 3. The current example has been tested with Python 3.8.
